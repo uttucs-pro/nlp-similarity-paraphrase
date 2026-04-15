@@ -1,0 +1,37 @@
+Project Proposal: Paraphrase
+Detection and Semantic Textual
+Similarity Using Deep Learning
+Natural Language Processing (NLP) systems are increasingly focused on understanding the
+semantic meaning of text beyond its surface form. Two closely related NLP tasks, Paraphrase
+Detection (PD) and Semantic Textual Similarity (STS), aim to quantify the similarity between two
+texts in terms of meaning irrespective of diﬀerences in wording or syntax. Paraphrase detection is
+typically a binary classification problem where the goal is to determine if two sentences convey
+the same meaning. Semantic textual similarity, on the other hand, is modelled as a regression or
+ranking task assigning a graded similarity score. These tasks are foundational to various real-
+world applications such as question answering systems plagiarism detection, information retrieval
+and duplicate content identification.
+This project’s main goal is to design and assess a deep learning system for paraphrase detection
+and semantic textual similarity. It will compare traditional neural architectures with modern
+transformer-based models to understand their eﬀectiveness in capturing semantic relationships
+between sentence pairs. Specifically, the project will investigate how contextualised word
+representations enhance semantic comprehension compared to static embeddings and how fine-
+tuning pretrained language models improves performance on downstream NLP tasks.
+The proposed system will process pairs of sentences and generate dense vector representations
+using deep neural models. Initial experiments will focus on baseline approaches like Siamese
+neural networks with Long Short-Term Memory (LSTM) or Gated Recurrent Unit (GRU) encoders.
+These architectures independently encode each sentence and calculate similarity using distance
+metrics like cosine or Manhattan distance. Building on these, the project will introduce
+transformer-based architectures such as BERT or its variants. These architectures utilise self-
+attention mechanisms to better model contextual dependencies. Fine-tuning these models on
+labelled paraphrase and similarity datasets is anticipated to significantly enhance performance.
+For training and evaluation, publicly available benchmark datasets like the Microsoft Research
+Paraphrase Corpus (MRPC), Quora Question Pairs (QQP) and Semantic Textual Similarity
+Benchmark (STS-B) will be utilised. Appropriate preprocessing steps including tokenisation,
+sentence normalisation and handling out-of-vocabulary terms will be applied. Model performance
+will be assessed using standard metrics like accuracy, F1-score, Pearson correlation and
+Spearman rank correlation depending on the task.
+The project’s goal is to compare deep learning architectures for semantic similarity tasks,
+highlighting their strengths and weaknesses. It will also oﬀer insights into the trade-oﬀs between
+computational complexity and model performance. Ultimately, this project aims to demonstrate
+how deep learning models can eﬀectively capture semantic equivalence and similarity in natural
+language, underscoring their significance in modern NLP systems.

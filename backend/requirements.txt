@@ -1,0 +1,14 @@
+torch
+transformers
+datasets
+scikit-learn
+pandas
+numpy
+tqdm
+matplotlib
+sentence-transformers
+scipy
+gensim
+fastapi
+uvicorn
+pydantic
