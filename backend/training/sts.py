@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 from datasets import load_dataset
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-from transformers import BertTokenizer, DistilBertTokenizer, RobertaTokenizer
+from transformers import (
+    BertTokenizer,
+    DistilBertTokenizer,
+    RobertaTokenizer,
+    get_linear_schedule_with_warmup,
+)
 
 try:
     from src.glove_utils import build_vocab, load_glove_embeddings
@@ -53,7 +60,12 @@ from .common import (
 
 SIAMESE_HIDDEN_DIM = 128
 SIAMESE_MAX_LEN = 64
+SIAMESE_EPOCHS = 20
+SIAMESE_LR = 5e-4
+SIAMESE_PATIENCE = 5
 TRANSFORMER_MAX_LEN = 128
+TRANSFORMER_EPOCHS = 4
+TRANSFORMER_LR = 3e-5
 SBERT_MODEL_ID = "all-MiniLM-L6-v2"
 
 
@@ -75,10 +87,11 @@ def train_and_export_sts(checkpoint_root: Path | None = None) -> dict:
     word2idx, _ = build_vocab(all_sentences)
     embedding_matrix = load_glove_embeddings(word2idx)
 
+    # NOTE: Labels are normalised from [0, 5] to [0, 1] for BOTH train and val
     siamese_train = SiameseTextDataset(
         train_data["sentence1"],
         train_data["sentence2"],
-        train_data["label"],
+        [label / 5.0 for label in train_data["label"]],
         word2idx,
         max_len=SIAMESE_MAX_LEN,
         task="regression",
@@ -108,15 +121,37 @@ def train_and_export_sts(checkpoint_root: Path | None = None) -> dict:
     }
 
     for name, model in siamese_models.items():
-        print(f"\nTraining {name}...")
+        print(f"\nTraining {name} (max {SIAMESE_EPOCHS} epochs, patience={SIAMESE_PATIENCE})...")
         model = model.to(device)
-        optimizer = AdamW(model.parameters(), lr=1e-3)
-        for epoch in range(5):
-            loss = train_siamese(model, siamese_train_loader, optimizer, device)
-            print(f"  Epoch {epoch + 1} loss: {loss:.4f}")
+        optimizer = AdamW(model.parameters(), lr=SIAMESE_LR, weight_decay=0.01)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=3, factor=0.5)
+        best_result = None
+        best_loss = float("inf")
+        patience_counter = 0
 
-        result = evaluate_sts_siamese(model, siamese_val_loader, device)
-        results[name] = result
+        for epoch in range(SIAMESE_EPOCHS):
+            loss = train_siamese(model, siamese_train_loader, optimizer, device)
+            val_result = evaluate_sts_siamese(model, siamese_val_loader, device)
+            scheduler.step(loss)
+            print(
+                f"  Epoch {epoch + 1} loss: {loss:.4f}  "
+                f"pearson: {val_result['pearson']:.4f}  "
+                f"spearman: {val_result['spearman']:.4f}"
+            )
+
+            if loss < best_loss:
+                best_loss = loss
+                best_result = val_result
+                best_state = copy.deepcopy(model.state_dict())
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= SIAMESE_PATIENCE:
+                    print(f"  Early stopping at epoch {epoch + 1}")
+                    break
+
+        model.load_state_dict(best_state)
+        results[name] = best_result
         export_siamese_checkpoint(
             task="semantic_similarity",
             dataset="stsb",
@@ -147,7 +182,7 @@ def train_and_export_sts(checkpoint_root: Path | None = None) -> dict:
     }
 
     for name, (model_fn, tokenizer_cls, tokenizer_name) in transformer_models.items():
-        print(f"\nTraining {name}...")
+        print(f"\nTraining {name} ({TRANSFORMER_EPOCHS} epochs)...")
         tokenizer = tokenizer_cls.from_pretrained(tokenizer_name)
         train_dataset = STSDataset(
             train_data["sentence1"],
@@ -167,9 +202,15 @@ def train_and_export_sts(checkpoint_root: Path | None = None) -> dict:
         val_loader = DataLoader(val_dataset, batch_size=8)
 
         model = model_fn().to(device)
-        optimizer = AdamW(model.parameters(), lr=2e-5)
-        for epoch in range(2):
-            loss = train_model(model, train_loader, optimizer, device)
+        optimizer = AdamW(model.parameters(), lr=TRANSFORMER_LR)
+        total_steps = len(train_loader) * TRANSFORMER_EPOCHS
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=int(0.1 * total_steps),
+            num_training_steps=total_steps,
+        )
+        for epoch in range(TRANSFORMER_EPOCHS):
+            loss = train_model(model, train_loader, optimizer, device, scheduler=scheduler)
             print(f"  Epoch {epoch + 1} loss: {loss:.4f}")
 
         result = evaluate_sts(model, val_loader, device)

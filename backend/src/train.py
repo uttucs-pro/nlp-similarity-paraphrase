@@ -1,7 +1,8 @@
+import torch
 from tqdm import tqdm
 
 
-def train_model(model, dataloader, optimizer, device):
+def train_model(model, dataloader, optimizer, device, scheduler=None):
     """Training loop for HuggingFace transformer models (classification & regression)."""
     model.train()
     total_loss = 0
@@ -14,14 +15,17 @@ def train_model(model, dataloader, optimizer, device):
 
         loss = outputs.loss
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
 
 
-def train_siamese(model, dataloader, optimizer, device):
+def train_siamese(model, dataloader, optimizer, device, scheduler=None):
     """
     Training loop for Siamese LSTM/GRU models.
 
@@ -42,8 +46,12 @@ def train_siamese(model, dataloader, optimizer, device):
 
         loss = outputs['loss']
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
+

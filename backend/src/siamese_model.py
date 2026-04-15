@@ -119,10 +119,11 @@ class SiameseLSTM(nn.Module):
                 loss_fn = nn.CrossEntropyLoss()
                 result["loss"] = loss_fn(output, labels)
         else:
-            result["scores"] = output.squeeze(1)
+            scores = torch.sigmoid(output.squeeze(1))
+            result["scores"] = scores
             if labels is not None:
                 loss_fn = nn.MSELoss()
-                result["loss"] = loss_fn(output.squeeze(1), labels.float())
+                result["loss"] = loss_fn(scores, labels.float())
 
         return result
 
@@ -228,9 +229,10 @@ class SiameseGRU(nn.Module):
                 loss_fn = nn.CrossEntropyLoss()
                 result["loss"] = loss_fn(output, labels)
         else:
-            result["scores"] = output.squeeze(1)
+            scores = torch.sigmoid(output.squeeze(1))
+            result["scores"] = scores
             if labels is not None:
                 loss_fn = nn.MSELoss()
-                result["loss"] = loss_fn(output.squeeze(1), labels.float())
+                result["loss"] = loss_fn(scores, labels.float())
 
         return result
