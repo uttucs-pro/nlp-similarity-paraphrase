@@ -3,6 +3,10 @@
   padding: 40px 28px 64px;
 }
 
+/* ==========================================================================
+   HERO PANEL
+   ========================================================================== */
+
 .hero-panel {
   position: relative;
   overflow: hidden;
@@ -86,6 +90,10 @@ th {
   color: var(--muted);
   font-size: 0.94rem;
 }
+
+/* ==========================================================================
+   WORKSPACE (INPUT + RESULTS)
+   ========================================================================== */
 
 .workspace {
   display: grid;
@@ -251,6 +259,117 @@ th {
   text-align: center;
 }
 
+/* ==========================================================================
+   DATASET TABS
+   ========================================================================== */
+
+.dataset-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 20px;
+  background: rgba(49, 65, 72, 0.06);
+}
+
+.dataset-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 16px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.dataset-tab strong {
+  font-size: 0.95rem;
+  color: inherit;
+}
+
+.dataset-tab span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}
+
+.dataset-tab:hover {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--heading);
+}
+
+.dataset-tab.active {
+  background: white;
+  border-color: var(--teal-strong);
+  color: var(--teal-strong);
+  box-shadow: 0 4px 16px rgba(18, 120, 117, 0.12);
+  transform: translateY(-1px);
+}
+
+.dataset-tab.active strong {
+  color: var(--teal-strong);
+}
+
+/* ==========================================================================
+   VARIANT COMPARISON (BASE vs TUNED)
+   ========================================================================== */
+
+.variant-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.variant-column {
+  display: grid;
+  gap: 12px;
+}
+
+.variant-header {
+  display: flex;
+  align-items: center;
+}
+
+.variant-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.variant-badge.base {
+  background: rgba(103, 118, 126, 0.12);
+  color: var(--muted-strong);
+}
+
+.variant-badge.tuned {
+  background: rgba(18, 120, 117, 0.12);
+  color: var(--teal-strong);
+}
+
+.variant-heading {
+  margin: 0 0 8px;
+}
+
+/* ==========================================================================
+   TABLES
+   ========================================================================== */
+
 .result-sections {
   display: grid;
   gap: 18px;
@@ -329,6 +448,60 @@ tbody tr:last-child td {
   color: var(--muted-strong);
 }
 
+/* ==========================================================================
+   TRAINING RESULTS PANEL
+   ========================================================================== */
+
+.training-results-panel {
+  margin-top: 40px;
+  padding: 40px;
+  border-radius: 36px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 32px 100px rgba(29, 47, 57, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.training-results-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: linear-gradient(90deg, var(--teal-strong), var(--rust), var(--teal-strong));
+}
+
+.benchmark-tabs {
+  margin-top: 20px;
+  margin-bottom: 28px;
+}
+
+.benchmark-variants {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.benchmark-variant-col {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.result-card-header h3 {
+  margin: 0;
+  font-family: var(--heading-font);
+  font-size: 1.75rem;
+  color: var(--heading);
+  letter-spacing: -0.02em;
+}
+
+/* ==========================================================================
+   RESPONSIVE
+   ========================================================================== */
+
 @media (max-width: 1100px) {
   .workspace,
   .meta-grid {
@@ -340,6 +513,11 @@ tbody tr:last-child td {
   .submit-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .variant-comparison,
+  .benchmark-variants {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -366,98 +544,13 @@ tbody tr:last-child td {
   td {
     padding: 12px 13px;
   }
-}
 
-/* ==========================================================================
-   TRAINING RESULTS PANEL 
-   ========================================================================== */
+  .dataset-tabs {
+    flex-direction: column;
+  }
 
-.training-results-panel {
-  margin-top: 40px;
-  padding: 40px;
-  border-radius: 36px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  box-shadow: 0 32px 100px rgba(29, 47, 57, 0.08);
-  position: relative;
-  overflow: hidden;
-}
-
-.training-results-panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 6px;
-  background: linear-gradient(90deg, var(--teal-strong), var(--rust), var(--teal-strong));
-}
-
-.dataset-results-grid {
-  display: grid;
-  gap: 32px;
-  margin-top: 28px;
-}
-
-.dataset-card {
-  padding: 32px;
-  border-radius: 28px;
-  background: #ffffff;
-  border: 1px solid rgba(136, 154, 164, 0.2);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.04);
-  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 300ms ease;
-}
-
-.dataset-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.08);
-  border-color: rgba(18, 120, 117, 0.25);
-}
-
-.result-card-header h3 {
-  margin: 0;
-  font-family: var(--heading-font);
-  font-size: 1.75rem;
-  color: var(--heading);
-  letter-spacing: -0.02em;
-}
-
-.plot-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 24px;
-  margin-top: 32px;
-}
-
-.plot-gallery img {
-  width: 100%;
-  height: auto;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-  background: white;
-  transition: transform 300ms ease, box-shadow 300ms ease;
-}
-
-.plot-gallery img:hover {
-  transform: scale(1.02);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
-  z-index: 2;
-}
-
-.plot-gallery .full-width-plot {
-  grid-column: 1 / -1;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-
-@media (max-width: 720px) {
   .training-results-panel {
     padding: 24px 16px;
     border-radius: 28px;
-  }
-  
-  .dataset-card {
-    padding: 20px 16px;
   }
 }

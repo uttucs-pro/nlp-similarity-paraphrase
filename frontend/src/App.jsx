@@ -3,7 +3,13 @@ import './App.css'
 import { predictSentencePair } from './lib/api.js'
 import { datasetResults } from './lib/resultsData.js'
 
-const PARAPHRASE_MODELS = [
+const DATASET_TABS = [
+  { key: 'mrpc', label: 'MRPC', subtitle: 'Paraphrase Detection' },
+  { key: 'qqp', label: 'QQP', subtitle: 'Question Pairs' },
+  { key: 'stsb', label: 'STS-B', subtitle: 'Semantic Similarity' },
+]
+
+const CLASSIFICATION_MODELS = [
   'Siamese-LSTM',
   'Siamese-GRU',
   'BERT',
@@ -11,7 +17,15 @@ const PARAPHRASE_MODELS = [
   'DistilBERT',
 ]
 
-const SIMILARITY_MODELS = [
+const SIMILARITY_MODELS_BASE = [
+  'Siamese-LSTM',
+  'Siamese-GRU',
+  'BERT',
+  'RoBERTa',
+  'DistilBERT',
+]
+
+const SIMILARITY_MODELS_TUNED = [
   'Siamese-LSTM',
   'Siamese-GRU',
   'BERT',
@@ -27,45 +41,21 @@ const EXAMPLE_INPUT = {
 
 function classifyTone(label) {
   const normalised = String(label ?? '').toLowerCase()
-
-  if (normalised.includes('not')) {
-    return 'negative'
-  }
-
-  if (normalised.includes('para') || normalised.includes('similar')) {
-    return 'positive'
-  }
-
+  if (normalised.includes('not')) return 'negative'
+  if (normalised.includes('para') || normalised.includes('similar')) return 'positive'
   return 'neutral'
 }
 
 function formatConfidence(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return 'N/A'
-  }
-
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A'
   const numeric = Number(value)
-  if (numeric <= 1) {
-    return `${(numeric * 100).toFixed(1)}%`
-  }
-
+  if (numeric <= 1) return `${(numeric * 100).toFixed(1)}%`
   return `${numeric.toFixed(1)}%`
 }
 
 function formatScore(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return 'N/A'
-  }
-
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A'
   return Number(value).toFixed(3)
-}
-
-function getClassificationEntry(results, modelName) {
-  return results?.paraphrase_detection?.[modelName] ?? null
-}
-
-function getSimilarityEntry(results, modelName) {
-  return results?.semantic_similarity?.[modelName] ?? null
 }
 
 function App() {
@@ -75,25 +65,27 @@ function App() {
   const [requestError, setRequestError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [results, setResults] = useState(null)
+  const [activeDataset, setActiveDataset] = useState('mrpc')
+  const [activeBenchmarkDataset, setActiveBenchmarkDataset] = useState('mrpc')
 
   const hasResults = Boolean(results)
 
   const metaCards = useMemo(
     () => [
       {
-        title: 'Paraphrase Detection',
-        value: '5 models',
-        detail: 'Binary classification across Siamese and transformer systems.',
+        title: 'Datasets',
+        value: '3',
+        detail: 'MRPC, QQP, and STS-B benchmark datasets.',
       },
       {
-        title: 'Semantic Similarity',
-        value: '6 models',
-        detail: 'Continuous similarity scoring, including SBERT zero-shot output.',
+        title: 'Model Variants',
+        value: 'Base + Tuned',
+        detail: 'Pre-trained (no fine-tuning) vs. fine-tuned models.',
       },
       {
-        title: 'Backend Contract',
-        value: 'POST /predict',
-        detail: 'Frontend expects JSON results keyed by model name.',
+        title: 'Total Predictions',
+        value: '32',
+        detail: '3 datasets × 2 variants × 5 models + SBERT.',
       },
     ],
     [],
@@ -101,29 +93,19 @@ function App() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-
-    const trimmedSentence1 = sentence1.trim()
-    const trimmedSentence2 = sentence2.trim()
-
-    if (!trimmedSentence1 || !trimmedSentence2) {
-      setValidationError('Both sentence fields are required before running inference.')
+    const trimmedS1 = sentence1.trim()
+    const trimmedS2 = sentence2.trim()
+    if (!trimmedS1 || !trimmedS2) {
+      setValidationError('Both sentence fields are required.')
       setRequestError('')
       return
     }
-
     setValidationError('')
     setRequestError('')
     setIsSubmitting(true)
-
     try {
-      const response = await predictSentencePair({
-        sentence1: trimmedSentence1,
-        sentence2: trimmedSentence2,
-      })
-
-      startTransition(() => {
-        setResults(response)
-      })
+      const response = await predictSentencePair({ sentence1: trimmedS1, sentence2: trimmedS2 })
+      startTransition(() => setResults(response))
     } catch (error) {
       setRequestError(error.message || 'The prediction request failed.')
     } finally {
@@ -146,6 +128,139 @@ function App() {
     setResults(null)
   }
 
+  // Get live prediction data for a variant
+  function getVariantPredictions(datasetKey, variant) {
+    return results?.[datasetKey]?.[variant] ?? {}
+  }
+
+  function getDatasetTask(datasetKey) {
+    return results?.[datasetKey]?.task ?? (datasetKey === 'stsb' ? 'semantic_similarity' : 'paraphrase_detection')
+  }
+
+  // Render a classification table for a variant
+  function renderClassificationTable(predictions, variant) {
+    return (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Prediction</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {CLASSIFICATION_MODELS.map((modelName) => {
+              const entry = predictions[modelName]
+              const label = entry?.label ?? 'Unavailable'
+              const confidence = entry?.confidence
+              return (
+                <tr key={modelName}>
+                  <td>{modelName}</td>
+                  <td><span className={`tag ${classifyTone(label)}`}>{label}</span></td>
+                  <td>{formatConfidence(confidence)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  // Render a similarity table for a variant
+  function renderSimilarityTable(predictions, variant) {
+    const models = variant === 'tuned' ? SIMILARITY_MODELS_TUNED : SIMILARITY_MODELS_BASE
+    return (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Score</th>
+              <th>Scale</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((modelName) => {
+              const entry = predictions[modelName]
+              return (
+                <tr key={modelName}>
+                  <td>{modelName}</td>
+                  <td>{formatScore(entry?.score)}</td>
+                  <td>{entry?.scale ?? 'N/A'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  // Render benchmark results for a dataset
+  function renderBenchmarkDataset(datasetKey) {
+    const dsData = datasetResults[datasetKey]
+    if (!dsData) return null
+    const isClassification = dsData.task === 'paraphrase_detection'
+
+    return (
+      <div className="benchmark-variants">
+        {['base', 'tuned'].map((variant) => {
+          const variantData = dsData[variant]
+          if (!variantData) return null
+          return (
+            <div className="benchmark-variant-col" key={variant}>
+              <h4 className="variant-heading">
+                <span className={`variant-badge ${variant}`}>{variant === 'base' ? 'Base (Pre-trained)' : 'Tuned (Fine-tuned)'}</span>
+              </h4>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Model</th>
+                      {isClassification ? (
+                        <>
+                          <th>Accuracy</th>
+                          <th>F1</th>
+                          <th>Time (s)</th>
+                        </>
+                      ) : (
+                        <>
+                          <th>Pearson</th>
+                          <th>Spearman</th>
+                        </>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(variantData).map(([model, metrics]) => (
+                      <tr key={model}>
+                        <td>{model}</td>
+                        {isClassification ? (
+                          <>
+                            <td>{(metrics.accuracy * 100).toFixed(1)}%</td>
+                            <td>{(metrics.f1 * 100).toFixed(1)}</td>
+                            <td>{metrics.time.toFixed(3)}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td>{metrics.pearson.toFixed(3)}</td>
+                            <td>{metrics.spearman.toFixed(3)}</td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <main className="app-shell">
       <section className="hero-panel">
@@ -154,12 +269,10 @@ function App() {
           <div>
             <h1>Test sentence pairs across every model in the project.</h1>
             <p className="lede">
-              Enter two sentences and compare paraphrase classification alongside
-              semantic similarity scores from the Siamese baselines, fine-tuned
-              transformers, and SBERT.
+              Enter two sentences and compare predictions from base (pre-trained)
+              and tuned (fine-tuned) models across MRPC, QQP, and STS-B datasets.
             </p>
           </div>
-
           <div className="meta-grid">
             {metaCards.map((card) => (
               <article className="meta-card" key={card.title}>
@@ -180,51 +293,31 @@ function App() {
               <h2>Sentence Pair</h2>
             </div>
             <div className="button-row">
-              <button className="ghost-button" onClick={handleFillExample} type="button">
-                Use Example
-              </button>
-              <button className="ghost-button" onClick={handleClear} type="button">
-                Clear
-              </button>
+              <button className="ghost-button" onClick={handleFillExample} type="button">Use Example</button>
+              <button className="ghost-button" onClick={handleClear} type="button">Clear</button>
             </div>
           </div>
 
           <label className="field">
             <span>Sentence 1</span>
-            <textarea
-              value={sentence1}
-              onChange={(event) => setSentence1(event.target.value)}
-              placeholder="Enter the first sentence..."
-              rows={5}
-            />
+            <textarea value={sentence1} onChange={(e) => setSentence1(e.target.value)} placeholder="Enter the first sentence..." rows={5} />
           </label>
 
           <label className="field">
             <span>Sentence 2</span>
-            <textarea
-              value={sentence2}
-              onChange={(event) => setSentence2(event.target.value)}
-              placeholder="Enter the second sentence..."
-              rows={5}
-            />
+            <textarea value={sentence2} onChange={(e) => setSentence2(e.target.value)} placeholder="Enter the second sentence..." rows={5} />
           </label>
 
           <div className="submit-row">
             <button className="primary-button" disabled={isSubmitting} type="submit">
               {isSubmitting ? 'Running models...' : 'Compare Sentences'}
             </button>
-            <p className="endpoint-note">
-              API target: <code>POST /predict</code>
-            </p>
+            <p className="endpoint-note">API target: <code>POST /predict</code></p>
           </div>
 
           {validationError ? <p className="message error">{validationError}</p> : null}
           {requestError ? <p className="message error">{requestError}</p> : null}
-          {isSubmitting ? (
-            <p className="message loading">
-              Sending the pair to the backend and waiting for model outputs.
-            </p>
-          ) : null}
+          {isSubmitting ? <p className="message loading">Sending the pair to the backend and waiting for model outputs.</p> : null}
         </form>
 
         <section className="results-panel">
@@ -240,97 +333,51 @@ function App() {
 
           {!hasResults ? (
             <div className="empty-state">
-              <p>
-                Results will appear here after the backend returns paraphrase and
-                similarity predictions for the submitted pair.
-              </p>
+              <p>Results will appear here after the backend returns predictions from all datasets and variants.</p>
             </div>
           ) : (
-            <div className="result-sections">
-              <section className="result-card">
-                <div className="result-card-header">
-                  <div>
-                    <p className="section-label">Task A</p>
-                    <h3>Paraphrase Detection</h3>
-                  </div>
-                  <p className="result-description">
-                    Binary classification and optional confidence from the models
-                    trained for paraphrase detection.
-                  </p>
-                </div>
+            <>
+              {/* Dataset tabs */}
+              <div className="dataset-tabs">
+                {DATASET_TABS.map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`dataset-tab ${activeDataset === tab.key ? 'active' : ''}`}
+                    onClick={() => setActiveDataset(tab.key)}
+                    type="button"
+                  >
+                    <strong>{tab.label}</strong>
+                    <span>{tab.subtitle}</span>
+                  </button>
+                ))}
+              </div>
 
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Model</th>
-                        <th>Prediction</th>
-                        <th>Confidence</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {PARAPHRASE_MODELS.map((modelName) => {
-                        const entry = getClassificationEntry(results, modelName)
-                        const label = entry?.label ?? 'Unavailable'
-                        const confidence = entry?.confidence
-
-                        return (
-                          <tr key={modelName}>
-                            <td>{modelName}</td>
-                            <td>
-                              <span className={`tag ${classifyTone(label)}`}>{label}</span>
-                            </td>
-                            <td>{formatConfidence(confidence)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section className="result-card">
-                <div className="result-card-header">
-                  <div>
-                    <p className="section-label">Task B</p>
-                    <h3>Semantic Similarity</h3>
-                  </div>
-                  <p className="result-description">
-                    Continuous similarity scores returned by the STS-capable
-                    models currently in the project.
-                  </p>
-                </div>
-
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Model</th>
-                        <th>Score</th>
-                        <th>Scale</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {SIMILARITY_MODELS.map((modelName) => {
-                        const entry = getSimilarityEntry(results, modelName)
-
-                        return (
-                          <tr key={modelName}>
-                            <td>{modelName}</td>
-                            <td>{formatScore(entry?.score)}</td>
-                            <td>{entry?.scale ?? 'N/A'}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
+              {/* Base vs Tuned comparison */}
+              <div className="variant-comparison">
+                {['base', 'tuned'].map((variant) => {
+                  const predictions = getVariantPredictions(activeDataset, variant)
+                  const task = getDatasetTask(activeDataset)
+                  const isClassification = task === 'paraphrase_detection'
+                  return (
+                    <section className="variant-column" key={variant}>
+                      <div className="variant-header">
+                        <span className={`variant-badge ${variant}`}>
+                          {variant === 'base' ? 'Base (Pre-trained)' : 'Tuned (Fine-tuned)'}
+                        </span>
+                      </div>
+                      {isClassification
+                        ? renderClassificationTable(predictions, variant)
+                        : renderSimilarityTable(predictions, variant)}
+                    </section>
+                  )
+                })}
+              </div>
+            </>
           )}
         </section>
       </section>
 
+      {/* Training & Benchmark Results */}
       <section className="training-results-panel">
         <div className="panel-heading">
           <div>
@@ -338,119 +385,25 @@ function App() {
             <h2>Training & Benchmark Results</h2>
           </div>
           <p className="result-description">
-            Comprehensive evaluation metrics and architecture complexity analysis across MRPC, QQP, and STS-B datasets.
+            Base (pre-trained, no fine-tuning) vs Tuned (fine-tuned) performance across all datasets.
           </p>
         </div>
 
-        <div className="dataset-results-grid">
-          {/* MRPC Results */}
-          <article className="result-card dataset-card">
-            <div className="result-card-header">
-              <h3>MRPC (Paraphrase)</h3>
-              <p className="endpoint-note">Binary Classification</p>
-            </div>
-            
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Accuracy</th>
-                    <th>F1 Score</th>
-                    <th>Time (s)</th>
-                    <th>Params</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(datasetResults.mrpc).map(([model, metrics]) => (
-                    <tr key={model}>
-                      <td>{model}</td>
-                      <td>{(metrics.accuracy * 100).toFixed(1)}%</td>
-                      <td>{(metrics.f1 * 100).toFixed(1)}</td>
-                      <td>{metrics.time.toFixed(3)}</td>
-                      <td>{(metrics.total_params / 1000000).toFixed(1)}M</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="plot-gallery">
-              <img src="/plots/mrpc/accuracy.png" alt="MRPC Accuracy" loading="lazy" />
-              <img src="/plots/mrpc/f1.png" alt="MRPC F1 Score" loading="lazy" />
-              <img src="/plots/mrpc/complexity_tradeoff.png" alt="MRPC Complexity Tradeoff" loading="lazy" className="full-width-plot" />
-            </div>
-          </article>
-
-          {/* QQP Results */}
-          <article className="result-card dataset-card">
-            <div className="result-card-header">
-              <h3>QQP (Question Pairs)</h3>
-              <p className="endpoint-note">Binary Classification</p>
-            </div>
-            
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Accuracy</th>
-                    <th>F1 Score</th>
-                    <th>Time (s)</th>
-                    <th>Params</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(datasetResults.qqp).map(([model, metrics]) => (
-                    <tr key={model}>
-                      <td>{model}</td>
-                      <td>{(metrics.accuracy * 100).toFixed(1)}%</td>
-                      <td>{(metrics.f1 * 100).toFixed(1)}</td>
-                      <td>{metrics.time.toFixed(3)}</td>
-                      <td>{(metrics.total_params / 1000000).toFixed(1)}M</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="plot-gallery">
-              <img src="/plots/qqp/accuracy.png" alt="QQP Accuracy" loading="lazy" />
-              <img src="/plots/qqp/f1.png" alt="QQP F1 Score" loading="lazy" />
-              <img src="/plots/qqp/complexity_tradeoff.png" alt="QQP Complexity Tradeoff" loading="lazy" className="full-width-plot" />
-            </div>
-          </article>
-
-          {/* STS Results */}
-          <article className="result-card dataset-card">
-            <div className="result-card-header">
-              <h3>STS-B (Semantic Similarity)</h3>
-              <p className="endpoint-note">Regression</p>
-            </div>
-            
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Pearson</th>
-                    <th>Spearman</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(datasetResults.sts).map(([model, metrics]) => (
-                    <tr key={model}>
-                      <td>{model}</td>
-                      <td>{metrics.pearson.toFixed(3)}</td>
-                      <td>{metrics.spearman.toFixed(3)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="plot-gallery">
-              <img src="/plots/sts/sts_correlations.png" alt="STS Correlations" loading="lazy" className="full-width-plot" />
-            </div>
-          </article>
+        <div className="dataset-tabs benchmark-tabs">
+          {DATASET_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={`dataset-tab ${activeBenchmarkDataset === tab.key ? 'active' : ''}`}
+              onClick={() => setActiveBenchmarkDataset(tab.key)}
+              type="button"
+            >
+              <strong>{tab.label}</strong>
+              <span>{tab.subtitle}</span>
+            </button>
+          ))}
         </div>
+
+        {renderBenchmarkDataset(activeBenchmarkDataset)}
       </section>
     </main>
   )
