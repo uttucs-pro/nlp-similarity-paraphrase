@@ -38,6 +38,7 @@ def evaluate_sts(model, dataloader, device):
 
             # For regression models, logits has shape (batch, 1)
             predictions = outputs.logits.squeeze(1)
+            predictions = predictions.clamp(0.0, 1.0)
 
             all_preds.extend(predictions.cpu().numpy())
             all_labels.extend(batch['labels'].cpu().numpy())

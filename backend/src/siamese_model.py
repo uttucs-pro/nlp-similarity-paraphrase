@@ -17,6 +17,36 @@ import torch.nn.functional as F
 import numpy as np
 
 
+class Attention(nn.Module):
+    """
+    Self-attention pooling layer.
+
+    Learns to weight each encoder timestep by importance, producing
+    a weighted-average sentence representation instead of relying
+    solely on the final hidden state.
+    """
+
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.attn = nn.Linear(hidden_dim, 1)
+
+    def forward(self, encoder_outputs, mask=None):
+        """
+        Args:
+            encoder_outputs: (batch, seq_len, hidden_dim)
+            mask: (batch, seq_len) — 1 for real tokens, 0 for padding
+
+        Returns:
+            context: (batch, hidden_dim) — attention-weighted representation
+        """
+        scores = self.attn(encoder_outputs).squeeze(-1)  # (batch, seq_len)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
+        weights = F.softmax(scores, dim=1)  # (batch, seq_len)
+        context = torch.bmm(weights.unsqueeze(1), encoder_outputs).squeeze(1)
+        return context
+
+
 class SiameseLSTM(nn.Module):
     """
     Siamese network with LSTM encoders.
@@ -59,16 +89,22 @@ class SiameseLSTM(nn.Module):
             bidirectional=True
         )
 
+        # Attention pooling over all encoder timesteps
+        self.attention = Attention(hidden_dim * 2)
+
         self.dropout = nn.Dropout(dropout)
 
         # FC layers: input = cosine_sim (1) + manhattan_dist (1) + |h1 - h2| (hidden*2) + h1*h2 (hidden*2)
         fc_input_dim = 2 + hidden_dim * 4
         self.fc = nn.Sequential(
+            nn.BatchNorm1d(fc_input_dim),
             nn.Linear(fc_input_dim, 128),
             nn.ReLU(),
+            nn.BatchNorm1d(128),
             nn.Dropout(dropout),
             nn.Linear(128, 64),
             nn.ReLU(),
+            nn.BatchNorm1d(64),
             nn.Dropout(dropout),
         )
 
@@ -78,14 +114,18 @@ class SiameseLSTM(nn.Module):
             self.output_layer = nn.Linear(64, 1)  # regression score
 
     def encode(self, x):
-        """Encode a sentence through embedding + LSTM, return final hidden state."""
+        """Encode a sentence through embedding + LSTM + attention pooling."""
+        # Create mask: 1 for real tokens, 0 for padding (padding_idx=0)
+        mask = (x != 0).float()  # (batch, seq_len)
+
         embedded = self.embedding(x)  # (batch, seq_len, embed_dim)
         output, (hidden, cell) = self.lstm(embedded)
+        # output: (batch, seq_len, hidden_dim*2)
 
-        # Concatenate forward and backward final hidden states
-        hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)  # (batch, hidden_dim*2)
-        hidden = self.dropout(hidden)
-        return hidden
+        # Use attention pooling over all timesteps
+        attended = self.attention(output, mask)  # (batch, hidden_dim*2)
+        attended = self.dropout(attended)
+        return attended
 
     def forward(self, s1_input_ids, s2_input_ids, labels=None):
         """
@@ -122,7 +162,7 @@ class SiameseLSTM(nn.Module):
             scores = torch.sigmoid(output.squeeze(1))
             result["scores"] = scores
             if labels is not None:
-                loss_fn = nn.MSELoss()
+                loss_fn = nn.SmoothL1Loss()
                 result["loss"] = loss_fn(scores, labels.float())
 
         return result
@@ -169,16 +209,22 @@ class SiameseGRU(nn.Module):
             bidirectional=True
         )
 
+        # Attention pooling over all encoder timesteps
+        self.attention = Attention(hidden_dim * 2)
+
         self.dropout = nn.Dropout(dropout)
 
         # FC layers: input = cosine_sim (1) + manhattan_dist (1) + |h1 - h2| (hidden*2) + h1*h2 (hidden*2)
         fc_input_dim = 2 + hidden_dim * 4
         self.fc = nn.Sequential(
+            nn.BatchNorm1d(fc_input_dim),
             nn.Linear(fc_input_dim, 128),
             nn.ReLU(),
+            nn.BatchNorm1d(128),
             nn.Dropout(dropout),
             nn.Linear(128, 64),
             nn.ReLU(),
+            nn.BatchNorm1d(64),
             nn.Dropout(dropout),
         )
 
@@ -188,14 +234,18 @@ class SiameseGRU(nn.Module):
             self.output_layer = nn.Linear(64, 1)  # regression score
 
     def encode(self, x):
-        """Encode a sentence through embedding + GRU, return final hidden state."""
+        """Encode a sentence through embedding + GRU + attention pooling."""
+        # Create mask: 1 for real tokens, 0 for padding (padding_idx=0)
+        mask = (x != 0).float()  # (batch, seq_len)
+
         embedded = self.embedding(x)  # (batch, seq_len, embed_dim)
         output, hidden = self.gru(embedded)
+        # output: (batch, seq_len, hidden_dim*2)
 
-        # Concatenate forward and backward final hidden states
-        hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)  # (batch, hidden_dim*2)
-        hidden = self.dropout(hidden)
-        return hidden
+        # Use attention pooling over all timesteps
+        attended = self.attention(output, mask)  # (batch, hidden_dim*2)
+        attended = self.dropout(attended)
+        return attended
 
     def forward(self, s1_input_ids, s2_input_ids, labels=None):
         """
@@ -232,7 +282,7 @@ class SiameseGRU(nn.Module):
             scores = torch.sigmoid(output.squeeze(1))
             result["scores"] = scores
             if labels is not None:
-                loss_fn = nn.MSELoss()
+                loss_fn = nn.SmoothL1Loss()
                 result["loss"] = loss_fn(scores, labels.float())
 
         return result

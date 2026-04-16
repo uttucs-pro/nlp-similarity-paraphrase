@@ -45,14 +45,13 @@ from .common import (
 )
 
 
-SIAMESE_HIDDEN_DIM = 128
-SIAMESE_MAX_LEN = 64
-SIAMESE_EPOCHS = 20
-SIAMESE_LR = 5e-4
-SIAMESE_PATIENCE = 5
+SIAMESE_HIDDEN_DIM = 256
+SIAMESE_MAX_LEN = 80
+SIAMESE_EPOCHS = 30
+SIAMESE_LR = 2e-4
+SIAMESE_PATIENCE = 7
 TRANSFORMER_MAX_LEN = 128
-TRANSFORMER_EPOCHS = 4
-TRANSFORMER_LR = 3e-5
+TRANSFORMER_EPOCHS = 6
 
 
 def train_and_export_mrpc(checkpoint_root: Path | None = None) -> dict:
@@ -109,22 +108,22 @@ def train_and_export_mrpc(checkpoint_root: Path | None = None) -> dict:
         print(f"\nTraining {name} (max {SIAMESE_EPOCHS} epochs, patience={SIAMESE_PATIENCE})...")
         model = model.to(device)
         optimizer = AdamW(model.parameters(), lr=SIAMESE_LR, weight_decay=0.01)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=3, factor=0.5)
+        scheduler = ReduceLROnPlateau(optimizer, mode="max", patience=3, factor=0.5)
         best_result = None
-        best_loss = float("inf")
+        best_metric = -float("inf")
         patience_counter = 0
 
         for epoch in range(SIAMESE_EPOCHS):
             loss = train_siamese(model, siamese_train_loader, optimizer, device)
             result = benchmark_siamese(model, siamese_val_loader, device)
-            scheduler.step(loss)
+            scheduler.step(result["accuracy"])
             print(
                 f"  Epoch {epoch + 1} loss: {loss:.4f}  "
                 f"acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}"
             )
 
-            if loss < best_loss:
-                best_loss = loss
+            if result["accuracy"] > best_metric:
+                best_metric = result["accuracy"]
                 best_result = result
                 best_state = copy.deepcopy(model.state_dict())
                 patience_counter = 0
@@ -155,14 +154,15 @@ def train_and_export_mrpc(checkpoint_root: Path | None = None) -> dict:
         )
         model.to(device)
 
+    # Per-model learning rates for transformers
     transformer_models = {
-        "BERT": (get_bert, BertTokenizer, "bert-base-uncased"),
-        "RoBERTa": (get_roberta, RobertaTokenizer, "roberta-base"),
-        "DistilBERT": (get_distilbert, DistilBertTokenizer, "distilbert-base-uncased"),
+        "BERT": (get_bert, BertTokenizer, "bert-base-uncased", 3e-5),
+        "RoBERTa": (get_roberta, RobertaTokenizer, "roberta-base", 2e-5),
+        "DistilBERT": (get_distilbert, DistilBertTokenizer, "distilbert-base-uncased", 5e-5),
     }
 
-    for name, (model_fn, tokenizer_cls, tokenizer_name) in transformer_models.items():
-        print(f"\nTraining {name} ({TRANSFORMER_EPOCHS} epochs)...")
+    for name, (model_fn, tokenizer_cls, tokenizer_name, lr) in transformer_models.items():
+        print(f"\nTraining {name} ({TRANSFORMER_EPOCHS} epochs, lr={lr})...")
         tokenizer = tokenizer_cls.from_pretrained(tokenizer_name)
         train_dataset = SentencePairDataset(
             train_data["sentence1"],
@@ -182,19 +182,33 @@ def train_and_export_mrpc(checkpoint_root: Path | None = None) -> dict:
         val_loader = DataLoader(val_dataset, batch_size=8)
 
         model = model_fn().to(device)
-        optimizer = AdamW(model.parameters(), lr=TRANSFORMER_LR)
-        total_steps = len(train_loader) * TRANSFORMER_EPOCHS
+        optimizer = AdamW(model.parameters(), lr=lr)
+        accumulation_steps = 4
+        total_steps = (len(train_loader) // accumulation_steps) * TRANSFORMER_EPOCHS
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=int(0.1 * total_steps),
             num_training_steps=total_steps,
         )
+
+        # Validation-based model selection
+        best_metric = -float("inf")
+        best_state = None
+        best_result = None
         for epoch in range(TRANSFORMER_EPOCHS):
             loss = train_model(model, train_loader, optimizer, device, scheduler=scheduler)
-            print(f"  Epoch {epoch + 1} loss: {loss:.4f}")
+            result = benchmark_model(model, val_loader, device)
+            print(
+                f"  Epoch {epoch + 1} loss: {loss:.4f}  "
+                f"acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}"
+            )
+            if result["accuracy"] > best_metric:
+                best_metric = result["accuracy"]
+                best_state = copy.deepcopy(model.state_dict())
+                best_result = result
 
-        result = benchmark_model(model, val_loader, device)
-        results[name] = result
+        model.load_state_dict(best_state)
+        results[name] = best_result
         export_transformer_checkpoint(
             task="paraphrase_detection",
             dataset="mrpc",
