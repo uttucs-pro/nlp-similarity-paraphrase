@@ -1,6 +1,7 @@
 import { startTransition, useMemo, useState } from 'react'
 import './App.css'
 import { predictSentencePair } from './lib/api.js'
+import { datasetResults } from './lib/resultsData.js'
 
 const PARAPHRASE_MODELS = [
   'Siamese-LSTM',
@@ -328,6 +329,128 @@ function App() {
             </div>
           )}
         </section>
+      </section>
+
+      <section className="training-results-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">Evaluation</p>
+            <h2>Training & Benchmark Results</h2>
+          </div>
+          <p className="result-description">
+            Comprehensive evaluation metrics and architecture complexity analysis across MRPC, QQP, and STS-B datasets.
+          </p>
+        </div>
+
+        <div className="dataset-results-grid">
+          {/* MRPC Results */}
+          <article className="result-card dataset-card">
+            <div className="result-card-header">
+              <h3>MRPC (Paraphrase)</h3>
+              <p className="endpoint-note">Binary Classification</p>
+            </div>
+            
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Accuracy</th>
+                    <th>F1 Score</th>
+                    <th>Time (s)</th>
+                    <th>Params</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(datasetResults.mrpc).map(([model, metrics]) => (
+                    <tr key={model}>
+                      <td>{model}</td>
+                      <td>{(metrics.accuracy * 100).toFixed(1)}%</td>
+                      <td>{(metrics.f1 * 100).toFixed(1)}</td>
+                      <td>{metrics.time.toFixed(3)}</td>
+                      <td>{(metrics.total_params / 1000000).toFixed(1)}M</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="plot-gallery">
+              <img src="/plots/mrpc/accuracy.png" alt="MRPC Accuracy" loading="lazy" />
+              <img src="/plots/mrpc/f1.png" alt="MRPC F1 Score" loading="lazy" />
+              <img src="/plots/mrpc/complexity_tradeoff.png" alt="MRPC Complexity Tradeoff" loading="lazy" className="full-width-plot" />
+            </div>
+          </article>
+
+          {/* QQP Results */}
+          <article className="result-card dataset-card">
+            <div className="result-card-header">
+              <h3>QQP (Question Pairs)</h3>
+              <p className="endpoint-note">Binary Classification</p>
+            </div>
+            
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Accuracy</th>
+                    <th>F1 Score</th>
+                    <th>Time (s)</th>
+                    <th>Params</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(datasetResults.qqp).map(([model, metrics]) => (
+                    <tr key={model}>
+                      <td>{model}</td>
+                      <td>{(metrics.accuracy * 100).toFixed(1)}%</td>
+                      <td>{(metrics.f1 * 100).toFixed(1)}</td>
+                      <td>{metrics.time.toFixed(3)}</td>
+                      <td>{(metrics.total_params / 1000000).toFixed(1)}M</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="plot-gallery">
+              <img src="/plots/qqp/accuracy.png" alt="QQP Accuracy" loading="lazy" />
+              <img src="/plots/qqp/f1.png" alt="QQP F1 Score" loading="lazy" />
+              <img src="/plots/qqp/complexity_tradeoff.png" alt="QQP Complexity Tradeoff" loading="lazy" className="full-width-plot" />
+            </div>
+          </article>
+
+          {/* STS Results */}
+          <article className="result-card dataset-card">
+            <div className="result-card-header">
+              <h3>STS-B (Semantic Similarity)</h3>
+              <p className="endpoint-note">Regression</p>
+            </div>
+            
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Pearson</th>
+                    <th>Spearman</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(datasetResults.sts).map(([model, metrics]) => (
+                    <tr key={model}>
+                      <td>{model}</td>
+                      <td>{metrics.pearson.toFixed(3)}</td>
+                      <td>{metrics.spearman.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="plot-gallery">
+              <img src="/plots/sts/sts_correlations.png" alt="STS Correlations" loading="lazy" className="full-width-plot" />
+            </div>
+          </article>
+        </div>
       </section>
     </main>
   )
