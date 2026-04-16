@@ -45,3 +45,4 @@ plots/
 .cache/
 
 help/
+.DS_Store
