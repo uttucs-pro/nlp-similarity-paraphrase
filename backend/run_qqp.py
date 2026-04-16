@@ -1,5 +1,5 @@
-from training.qqp import main
+from training.qqp import run_qqp_benchmark
 
 
 if __name__ == "__main__":
-    main()
+    run_qqp_benchmark()

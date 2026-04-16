@@ -16,6 +16,56 @@ def _relative_to_root(path: Path, checkpoint_root: Path) -> str:
     return path.resolve().relative_to(checkpoint_root.resolve()).as_posix()
 
 
+# ---------------------------------------------------------------------------
+# Base (pre-trained, no fine-tuning) manifest export
+# ---------------------------------------------------------------------------
+
+def export_base_manifest(
+    *,
+    dataset: str,
+    model_name: str,
+    family: str,
+    model_id: str | None = None,
+    glove_path: str | None = None,
+    manifest_root: Path,
+) -> dict:
+    """
+    Export a manifest for a base (pre-trained, no fine-tuning) model.
+
+    Base models have no custom checkpoints — they reference pre-trained
+    model IDs (for transformers) or GloVe paths (for Siamese).
+    """
+    task = "semantic_similarity" if dataset == "stsb" else "paraphrase_detection"
+
+    manifest = {
+        "task": task,
+        "dataset": dataset,
+        "variant": "base",
+        "model_name": model_name,
+        "family": family,
+        "checkpoint_path": "",
+        "tokenizer_or_vocab_path": "",
+        "max_len": 128,
+        "output_type": "regression" if dataset == "stsb" else "classification",
+        "scale": "0-1",
+        "label_map": {"0": "Not Paraphrase", "1": "Paraphrase"} if task == "paraphrase_detection" else {},
+        "preprocessing_mode": "normalise_sentence",
+        "inference_mode": "embedding_similarity",
+    }
+
+    if model_id:
+        manifest["model_id"] = model_id
+    if glove_path:
+        manifest["glove_path"] = glove_path
+
+    write_json(manifest_root / manifest_filename(dataset, "base", model_name), manifest)
+    return manifest
+
+
+# ---------------------------------------------------------------------------
+# Tuned (fine-tuned) checkpoint export — Siamese
+# ---------------------------------------------------------------------------
+
 def export_siamese_checkpoint(
     *,
     task: str,
@@ -56,6 +106,7 @@ def export_siamese_checkpoint(
     manifest = {
         "task": task,
         "dataset": dataset,
+        "variant": "tuned",
         "model_name": model_name,
         "family": "siamese",
         "checkpoint_path": _relative_to_root(weights_path, checkpoint_root),
@@ -65,10 +116,15 @@ def export_siamese_checkpoint(
         "scale": scale,
         "label_map": {str(key): value for key, value in (label_map or {}).items()},
         "preprocessing_mode": "normalise_sentence",
+        "inference_mode": "model_forward",
     }
-    write_json(manifest_root / manifest_filename(task, model_name), manifest)
+    write_json(manifest_root / manifest_filename(dataset, "tuned", model_name), manifest)
     return manifest
 
+
+# ---------------------------------------------------------------------------
+# Tuned (fine-tuned) checkpoint export — Transformer
+# ---------------------------------------------------------------------------
 
 def export_transformer_checkpoint(
     *,
@@ -89,9 +145,11 @@ def export_transformer_checkpoint(
     model.save_pretrained(model_dir)
     tokenizer.save_pretrained(tokenizer_dir)
 
+    task_str = task
     manifest = {
-        "task": task,
+        "task": task_str,
         "dataset": dataset,
+        "variant": "tuned",
         "model_name": model_name,
         "family": "transformer",
         "checkpoint_path": _relative_to_root(model_dir, checkpoint_root),
@@ -101,10 +159,15 @@ def export_transformer_checkpoint(
         "scale": scale,
         "label_map": {str(key): value for key, value in (label_map or {}).items()},
         "preprocessing_mode": "normalise_sentence",
+        "inference_mode": "model_forward",
     }
-    write_json(manifest_root / manifest_filename(task, model_name), manifest)
+    write_json(manifest_root / manifest_filename(dataset, "tuned", model_name), manifest)
     return manifest
 
+
+# ---------------------------------------------------------------------------
+# SBERT manifest (zero-shot, only in tuned STS-B)
+# ---------------------------------------------------------------------------
 
 def export_sbert_manifest(
     *,
@@ -115,6 +178,7 @@ def export_sbert_manifest(
     manifest = {
         "task": "semantic_similarity",
         "dataset": "stsb",
+        "variant": "tuned",
         "model_name": model_name,
         "family": "sbert",
         "checkpoint_path": "",
@@ -125,9 +189,10 @@ def export_sbert_manifest(
         "label_map": {},
         "preprocessing_mode": "normalise_sentence",
         "model_id": model_id,
+        "inference_mode": "model_forward",
     }
     write_json(
-        manifest_root / manifest_filename("semantic_similarity", model_name),
+        manifest_root / manifest_filename("stsb", "tuned", model_name),
         manifest,
     )
     return manifest

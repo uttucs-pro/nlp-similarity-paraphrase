@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 from datasets import load_dataset
 from torch.optim import AdamW
@@ -14,6 +15,12 @@ from transformers import (
 )
 
 try:
+    from src.base_inference import (
+        BASE_TRANSFORMER_IDS,
+        glove_cosine_similarity,
+        transformer_cosine_similarity,
+        base_predict_paraphrase,
+    )
     from src.compare import benchmark_model, benchmark_siamese
     from src.dataset import SentencePairDataset
     from src.glove_utils import build_vocab, load_glove_embeddings
@@ -22,7 +29,13 @@ try:
     from src.siamese_model import SiameseGRU, SiameseLSTM
     from src.train import train_model, train_siamese
     from src.visualize import plot_complexity, plot_metrics
-except ModuleNotFoundError:  # pragma: no cover - repo-root import path
+except ModuleNotFoundError:  # pragma: no cover
+    from backend.src.base_inference import (
+        BASE_TRANSFORMER_IDS,
+        glove_cosine_similarity,
+        transformer_cosine_similarity,
+        base_predict_paraphrase,
+    )
     from backend.src.compare import benchmark_model, benchmark_siamese
     from backend.src.dataset import SentencePairDataset
     from backend.src.glove_utils import build_vocab, load_glove_embeddings
@@ -32,8 +45,17 @@ except ModuleNotFoundError:  # pragma: no cover - repo-root import path
     from backend.src.train import train_model, train_siamese
     from backend.src.visualize import plot_complexity, plot_metrics
 
-from .common import PLOTS_DIR, RESULTS_DIR, resolve_training_device, write_json
-
+from .artifacts import export_base_manifest, export_siamese_checkpoint, export_transformer_checkpoint
+from .common import (
+    PARAPHRASE_LABEL_MAP,
+    Variant,
+    checkpoint_root_for,
+    ensure_dir,
+    plots_dir_for,
+    resolve_training_device,
+    results_dir_for,
+    write_json,
+)
 
 TRAIN_SUBSET = 10000
 VAL_SUBSET = 2000
@@ -43,11 +65,100 @@ SIAMESE_MAX_LEN = 80
 SIAMESE_EPOCHS = 30
 SIAMESE_LR = 2e-4
 SIAMESE_PATIENCE = 7
+TRANSFORMER_MAX_LEN = 128
 TRANSFORMER_EPOCHS = 6
 
 
-def run_qqp_benchmark() -> dict:
+# ---------------------------------------------------------------------------
+# Base variant: evaluate pre-trained models on QQP (no fine-tuning)
+# ---------------------------------------------------------------------------
+
+def _evaluate_base_qqp(checkpoint_root: Path) -> dict:
+    manifest_root = ensure_dir(checkpoint_root / "base" / "manifests")
     device = resolve_training_device()
+
+    print("\n=== QQP BASE (Pre-trained, No Fine-tuning) ===")
+    print("Using device:", device)
+
+    dataset = load_dataset("glue", "qqp")
+    train_data = dataset["train"].select(range(min(TRAIN_SUBSET, len(dataset["train"]))))
+    val_data = dataset["validation"].select(range(min(VAL_SUBSET, len(dataset["validation"]))))
+    val_s1 = list(val_data["question1"])
+    val_s2 = list(val_data["question2"])
+    val_labels = list(val_data["label"])
+
+    # GloVe for Siamese base
+    all_sentences = list(train_data["question1"]) + list(train_data["question2"])
+    word2idx, _ = build_vocab(all_sentences)
+    embedding_matrix = load_glove_embeddings(word2idx)
+
+    from sklearn.metrics import accuracy_score, f1_score
+
+    results = {}
+
+    # Siamese base: GloVe mean-pooling
+    for name in ["Siamese-LSTM", "Siamese-GRU"]:
+        print(f"\nEvaluating base {name} (GloVe mean-pooling)...")
+        preds = []
+        for s1, s2 in zip(val_s1, val_s2):
+            sim = glove_cosine_similarity(s1, s2, word2idx, embedding_matrix)
+            pred = base_predict_paraphrase(sim)
+            preds.append(1 if pred["label"] == "Paraphrase" else 0)
+
+        acc = accuracy_score(val_labels, preds)
+        f1 = f1_score(val_labels, preds)
+        results[name] = {"accuracy": acc, "f1": f1, "time": 0.0, "total_params": 0, "trainable_params": 0}
+        print(f"  {name} base: acc={acc:.4f}, f1={f1:.4f}")
+
+        export_base_manifest(
+            dataset="qqp", model_name=name, family="siamese",
+            manifest_root=manifest_root,
+        )
+
+    # Transformer base: pre-trained encoder + cosine similarity
+    from transformers import AutoModel, AutoTokenizer
+    for name, model_id in BASE_TRANSFORMER_IDS.items():
+        print(f"\nEvaluating base {name} ({model_id}, mean-pooling)...")
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = AutoModel.from_pretrained(model_id).to(device)
+        model.eval()
+
+        preds = []
+        for s1, s2 in zip(val_s1, val_s2):
+            sim = transformer_cosine_similarity(s1, s2, model, tokenizer, device)
+            pred = base_predict_paraphrase(sim)
+            preds.append(1 if pred["label"] == "Paraphrase" else 0)
+
+        acc = accuracy_score(val_labels, preds)
+        f1 = f1_score(val_labels, preds)
+        total_params = sum(p.numel() for p in model.parameters())
+        results[name] = {"accuracy": acc, "f1": f1, "time": 0.0, "total_params": total_params, "trainable_params": 0}
+        print(f"  {name} base: acc={acc:.4f}, f1={f1:.4f}")
+
+        export_base_manifest(
+            dataset="qqp", model_name=name, family="transformer",
+            model_id=model_id, manifest_root=manifest_root,
+        )
+        del model
+
+    res_dir = results_dir_for("base")
+    plt_dir = plots_dir_for("base")
+    write_json(ensure_dir(res_dir) / "qqp_results.json", results)
+    plot_metrics(results, save_dir=str(ensure_dir(plt_dir / "qqp")))
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Tuned variant: fine-tune models on QQP (+ checkpoint export)
+# ---------------------------------------------------------------------------
+
+def _train_tuned_qqp(checkpoint_root: Path) -> dict:
+    ckpt_root = checkpoint_root_for("tuned")
+    manifest_root = ensure_dir(ckpt_root / "manifests")
+    output_root = ensure_dir(ckpt_root / "qqp")
+    device = resolve_training_device()
+
+    print("\n=== QQP TUNED (Fine-tuned) ===")
     print("Using device:", device)
     print("\nLoading QQP dataset...")
 
@@ -62,20 +173,12 @@ def run_qqp_benchmark() -> dict:
     embedding_matrix = load_glove_embeddings(word2idx)
 
     siamese_train = SiameseTextDataset(
-        train_data["question1"],
-        train_data["question2"],
-        train_data["label"],
-        word2idx,
-        max_len=SIAMESE_MAX_LEN,
-        task="classification",
+        train_data["question1"], train_data["question2"], train_data["label"],
+        word2idx, max_len=SIAMESE_MAX_LEN, task="classification",
     )
     siamese_val = SiameseTextDataset(
-        val_data["question1"],
-        val_data["question2"],
-        val_data["label"],
-        word2idx,
-        max_len=SIAMESE_MAX_LEN,
-        task="classification",
+        val_data["question1"], val_data["question2"], val_data["label"],
+        word2idx, max_len=SIAMESE_MAX_LEN, task="classification",
     )
     siamese_train_loader = DataLoader(siamese_train, batch_size=32, shuffle=True)
     siamese_val_loader = DataLoader(siamese_val, batch_size=32)
@@ -98,10 +201,7 @@ def run_qqp_benchmark() -> dict:
             loss = train_siamese(model, siamese_train_loader, optimizer, device)
             result = benchmark_siamese(model, siamese_val_loader, device)
             scheduler.step(result["accuracy"])
-            print(
-                f"  Epoch {epoch + 1} loss: {loss:.4f}  "
-                f"acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}"
-            )
+            print(f"  Epoch {epoch + 1} loss: {loss:.4f}  acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}")
 
             if result["accuracy"] > best_metric:
                 best_metric = result["accuracy"]
@@ -116,8 +216,18 @@ def run_qqp_benchmark() -> dict:
 
         model.load_state_dict(best_state)
         results[name] = best_result
+        # NEW: Export QQP checkpoints (was missing in original)
+        export_siamese_checkpoint(
+            task="paraphrase_detection", dataset="qqp", model_name=name,
+            model=model.cpu(),
+            output_dir=ensure_dir(output_root / name.lower().replace(" ", "-")),
+            embedding_matrix=embedding_matrix, word2idx=word2idx,
+            max_len=SIAMESE_MAX_LEN, hidden_dim=SIAMESE_HIDDEN_DIM,
+            num_layers=1, dropout=0.3, label_map=PARAPHRASE_LABEL_MAP,
+            scale="0-1", checkpoint_root=ckpt_root, manifest_root=manifest_root,
+        )
+        model.to(device)
 
-    # Per-model learning rates for transformers
     transformer_models = {
         "BERT": (get_bert, BertTokenizer, "bert-base-uncased", 3e-5),
         "RoBERTa": (get_roberta, RobertaTokenizer, "roberta-base", 2e-5),
@@ -128,15 +238,11 @@ def run_qqp_benchmark() -> dict:
         print(f"\nTraining {name} ({TRANSFORMER_EPOCHS} epochs, lr={lr})...")
         tokenizer = tokenizer_cls.from_pretrained(tokenizer_name)
         train_dataset = SentencePairDataset(
-            train_data["question1"],
-            train_data["question2"],
-            train_data["label"],
+            train_data["question1"], train_data["question2"], train_data["label"],
             tokenizer,
         )
         val_dataset = SentencePairDataset(
-            val_data["question1"],
-            val_data["question2"],
-            val_data["label"],
+            val_data["question1"], val_data["question2"], val_data["label"],
             tokenizer,
         )
         train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
@@ -147,22 +253,16 @@ def run_qqp_benchmark() -> dict:
         accumulation_steps = 4
         total_steps = (len(train_loader) // accumulation_steps) * TRANSFORMER_EPOCHS
         scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=int(0.1 * total_steps),
-            num_training_steps=total_steps,
+            optimizer, num_warmup_steps=int(0.1 * total_steps), num_training_steps=total_steps,
         )
 
-        # Validation-based model selection
         best_metric = -float("inf")
         best_state = None
         best_result = None
         for epoch in range(TRANSFORMER_EPOCHS):
             loss = train_model(model, train_loader, optimizer, device, scheduler=scheduler)
             result = benchmark_model(model, val_loader, device)
-            print(
-                f"  Epoch {epoch + 1} loss: {loss:.4f}  "
-                f"acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}"
-            )
+            print(f"  Epoch {epoch + 1} loss: {loss:.4f}  acc: {result['accuracy']:.4f}  f1: {result['f1']:.4f}")
             if result["accuracy"] > best_metric:
                 best_metric = result["accuracy"]
                 best_state = copy.deepcopy(model.state_dict())
@@ -170,11 +270,32 @@ def run_qqp_benchmark() -> dict:
 
         model.load_state_dict(best_state)
         results[name] = best_result
+        # NEW: Export QQP transformer checkpoints
+        export_transformer_checkpoint(
+            task="paraphrase_detection", dataset="qqp", model_name=name,
+            model=model.cpu(), tokenizer=tokenizer,
+            output_dir=ensure_dir(output_root / name.lower().replace(" ", "-")),
+            max_len=TRANSFORMER_MAX_LEN, label_map=PARAPHRASE_LABEL_MAP,
+            scale="0-1", checkpoint_root=ckpt_root, manifest_root=manifest_root,
+        )
+        model.to(device)
 
-    write_json(RESULTS_DIR / "qqp_results.json", results)
-    plot_metrics(results, save_dir=str(PLOTS_DIR / "qqp"))
-    plot_complexity(results, save_dir=str(PLOTS_DIR / "qqp"))
+    res_dir = results_dir_for("tuned")
+    plt_dir = plots_dir_for("tuned")
+    write_json(ensure_dir(res_dir) / "qqp_results.json", results)
+    plot_metrics(results, save_dir=str(ensure_dir(plt_dir / "qqp")))
+    plot_complexity(results, save_dir=str(ensure_dir(plt_dir / "qqp")))
     return results
+
+
+def run_qqp_benchmark(variant: Variant | None = None) -> dict:
+    checkpoint_root = Path(__file__).resolve().parents[1] / "checkpoints"
+    all_results = {}
+    if variant is None or variant == "base":
+        all_results["base"] = _evaluate_base_qqp(checkpoint_root)
+    if variant is None or variant == "tuned":
+        all_results["tuned"] = _train_tuned_qqp(checkpoint_root)
+    return all_results
 
 
 def main() -> None:

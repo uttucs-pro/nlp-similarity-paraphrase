@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Dict
 
 from pydantic import BaseModel
 
@@ -25,10 +25,18 @@ class SimilarityPrediction(BaseModel):
     scale: str
 
 
+class DatasetResults(BaseModel):
+    """Results for a single dataset, with base and tuned variant predictions."""
+    task: str  # "paraphrase_detection" or "semantic_similarity"
+    base: Dict[str, Any]
+    tuned: Dict[str, Any]
+
+
 class PredictResponse(BaseModel):
     input: InputPayload
-    paraphrase_detection: Dict[str, ClassificationPrediction]
-    semantic_similarity: Dict[str, SimilarityPrediction]
+    mrpc: DatasetResults
+    qqp: DatasetResults
+    stsb: DatasetResults
 
 
 class HealthResponse(BaseModel):
@@ -38,5 +46,6 @@ class HealthResponse(BaseModel):
 
 
 class ModelsResponse(BaseModel):
-    paraphrase_detection: list[str]
-    semantic_similarity: list[str]
+    mrpc: Dict[str, list[str]]
+    qqp: Dict[str, list[str]]
+    stsb: Dict[str, list[str]]

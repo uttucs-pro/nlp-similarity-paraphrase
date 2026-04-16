@@ -1,5 +1,5 @@
-from training.sts import main
+from training.sts import train_and_export_sts
 
 
 if __name__ == "__main__":
-    main()
+    train_and_export_sts()
